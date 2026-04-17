@@ -106,7 +106,7 @@ class TranslatorBot:
             self.current_key_index = 0
             self.failed_cycles += 1
             self.log_fn(f"\n[♻️] Quay hết 1 vòng các Key. Vòng lỗi: {self.failed_cycles}/{self.max_cycles}")
-            time.sleep(30) # Wait longer when all keys exhausted
+            time.sleep(60) # Wait longer when all keys exhausted
             
         if self.failed_cycles < self.max_cycles:
             self.setup_model()
@@ -141,8 +141,8 @@ class StatsTracker:
         
     def generate_report(self):
         rpm = self.get_rpm()
-        rpm_color = "[bold red]" if rpm >= 12 else "[bold green]"
-        return f"📊 [cyan]Hệ thống:[/] RPM: {rpm_color}{rpm}/15[/] | ✅: [green]{self.total_success}[/] | ❌: [red]{self.total_failed}[/] | 🪙 Tokens: [yellow]{self.total_tokens}[/]"
+        rpm_color = "[bold red]" if rpm >= 10 else "[bold green]"
+        return f"📊 [cyan]Hệ thống:[/] RPM: {rpm_color}{rpm}/10[/] | ✅: [green]{self.total_success}[/] | ❌: [red]{self.total_failed}[/] | 🪙 Tokens: [yellow]{self.total_tokens}[/]"
 
 # ==========================================
 # 6. GIAO DIỆN TUI (TEXTUAL)
@@ -314,16 +314,16 @@ class TranslatorTUI(App):
                         ui_up_key(bot.current_key_index)
                         ui_up_stats()
 
-                        # Throttle: Ensure we don't exceed 15 RPM
-                        while tracker.get_rpm() >= 14:
-                            ui_log("   [!] RPM chạm đỉnh, chờ 5s...")
-                            time.sleep(5)
+                        # Throttle: Ensure we don't exceed 10 RPM (Conservative)
+                        while tracker.get_rpm() >= 10:
+                            ui_log("   [!] RPM chạm ngưỡng, chờ 6s...")
+                            time.sleep(6)
                             ui_up_stats()
 
                         prompt = f"Dịch phụ đề IT. Ngữ cảnh: {TOPIC}. Thuật ngữ: {GLOSSARY}. Đoạn trước: {ctx[-200:]}.\n\n{chunk_content}"
                         
                         # Explicit delay before call
-                        time.sleep(2)
+                        time.sleep(3)
                         
                         # Using the legacy client method
                         response = bot.generate_content(prompt)
@@ -340,7 +340,7 @@ class TranslatorTUI(App):
                         ctx = response.text
                         chunk_idx += 1  
                         retry_count = 0 # Reset backoff on success
-                        time.sleep(4)  # Increased sleep to be safer (15 RPM)
+                        time.sleep(5)  # Increased sleep to be safer
                         ui_up_stats() # Update UI with new token count
 
                     except Exception as e:
@@ -350,13 +350,13 @@ class TranslatorTUI(App):
                             break # Stop processing this file, but continue the worker
                         elif "429" in err or "quota" in err:
                             retry_count += 1
-                            backoff = min(60, 2 ** retry_count) # Exponential backoff
+                            backoff = min(120, 2 ** (retry_count + 2)) # Exponential backoff
                             ui_up_key(bot.current_key_index, f"🔴 429 (Wait {backoff}s)")
                             ui_log(f"   [!] 429 Quota! Chờ {backoff}s và thử lại...")
                             time.sleep(backoff)
                             
                             # Rotate key if we've retried too many times on one key
-                            if retry_count > 3:
+                            if retry_count > 2:
                                 if not bot.rotate_key(): 
                                     ui_log("❌ Hết sạch Key khả dụng. Dừng chương trình.")
                                     return 
@@ -364,8 +364,8 @@ class TranslatorTUI(App):
                                 ui_up_key(bot.current_key_index, "🟢 Active")
                         
                         elif "500" in err or "503" in err or "504" in err:
-                            ui_log("   [!] Server lag, chờ 10s...")
-                            time.sleep(10)
+                            ui_log("   [!] Server lag, chờ 15s...")
+                            time.sleep(15)
                         else:
                             tracker.total_failed += 1
                             ui_up_file(item["row_key"], 2, "❌ Lỗi")
@@ -380,7 +380,7 @@ class TranslatorTUI(App):
                     ui_up_file(item["row_key"], 3, f"Key_{bot.current_key_index+1}")
                     ui_up_key(bot.current_key_index)
                 
-                time.sleep(1) # Small delay between files
+                time.sleep(2) # Small delay between files
 
             ui_log("✅ HOÀN TẤT CHIẾN DỊCH!")
         finally:
