@@ -75,8 +75,8 @@ class TranslatorBot:
     def setup_model(self):
         current_key = self.keys[self.current_key_index]
         genai.configure(api_key=current_key)
-        # Using the standard model name without 'models/' prefix
-        model_name = 'gemini-1.5-flash'
+        # Using the 'latest' version which is often more stable for API access
+        model_name = 'gemini-1.5-flash-latest'
         self.log_fn(f"[!] Kích hoạt Key #{self.current_key_index + 1}")
         self.model = genai.GenerativeModel(model_name)
 
@@ -269,6 +269,9 @@ class TranslatorTUI(App):
                             ui_up_stats()
 
                         prompt = f"Dịch phụ đề IT. Ngữ cảnh: {TOPIC}. Thuật ngữ: {GLOSSARY}. Đoạn trước: {ctx[-200:]}.\n\n{chunk_content}"
+                        
+                        # Explicit delay before call
+                        time.sleep(2)
                         
                         # Using the legacy client method
                         response = bot.generate_content(prompt)
