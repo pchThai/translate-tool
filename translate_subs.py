@@ -101,10 +101,14 @@ class StatsTracker:
         self.all_attempts = deque()
         self.total_success = 0
         self.total_failed = 0
+        self.total_tokens = 0
 
     def log_attempt(self):
         self.all_attempts.append(time.time())
         self.clean_old()
+
+    def add_tokens(self, count):
+        self.total_tokens += count
 
     def clean_old(self):
         now = time.time()
@@ -118,7 +122,7 @@ class StatsTracker:
     def generate_report(self):
         rpm = self.get_rpm()
         rpm_color = "[bold red]" if rpm >= 12 else "[bold green]"
-        return f"📊 [cyan]Hệ thống:[/] RPM thực tế: {rpm_color}{rpm}/15[/]  |  ✅ Xong: [green]{self.total_success}[/]  |  ❌ Lỗi: [red]{self.total_failed}[/]"
+        return f"📊 [cyan]Hệ thống:[/] RPM: {rpm_color}{rpm}/15[/] | ✅: [green]{self.total_success}[/] | ❌: [red]{self.total_failed}[/] | 🪙 Tokens: [yellow]{self.total_tokens}[/]"
 
 # ==========================================
 # 6. GIAO DIỆN TUI (TEXTUAL)
@@ -255,6 +259,10 @@ class TranslatorTUI(App):
                     response = bot.model.generate_content(prompt, request_options={"timeout": 120})
                     
                     if not response.text: raise Exception("Empty")
+                    
+                    # Track token usage
+                    if response.usage_metadata:
+                        tracker.add_tokens(response.usage_metadata.total_token_count)
 
                     with open(new_p, 'a', encoding='utf-8') as f:
                         f.write(response.text.strip() + "\n\n")
@@ -263,6 +271,7 @@ class TranslatorTUI(App):
                     chunk_idx += 1  
                     retry_count = 0 # Reset backoff on success
                     time.sleep(4)  # Increased sleep to be safer (15 RPM)
+                    ui_up_stats() # Update UI with new token count
 
                 except Exception as e:
                     err = str(e).lower()
