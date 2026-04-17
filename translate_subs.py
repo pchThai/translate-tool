@@ -80,14 +80,20 @@ class TranslatorBot:
         self.model = genai.GenerativeModel(self.model_name)
 
     @staticmethod
-    def get_available_models(api_key):
-        """Fetch models that support generateContent."""
-        genai.configure(api_key=api_key)
-        models = []
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                models.append((m.display_name, m.name))
-        return models
+    def get_available_models(api_keys):
+        """Fetch models that support generateContent, trying keys until one works."""
+        for key in api_keys:
+            try:
+                genai.configure(api_key=key)
+                models = []
+                for m in genai.list_models():
+                    if 'generateContent' in m.supported_generation_methods:
+                        models.append((m.display_name, m.name))
+                if models:
+                    return models
+            except Exception:
+                continue
+        return []
 
     def generate_content(self, prompt):
         # Using the legacy client structure
@@ -199,10 +205,13 @@ class TranslatorTUI(App):
     def on_mount(self) -> None:
         # Load models in background or on mount
         try:
-            models = TranslatorBot.get_available_models(API_KEYS[0])
+            models = TranslatorBot.get_available_models(API_KEYS)
             select = self.query_one("#model_select", Select)
-            select.set_options(models)
-            select.prompt = "Chọn Model"
+            if models:
+                select.set_options(models)
+                select.prompt = "Chọn Model"
+            else:
+                select.prompt = "Không tìm thấy model!"
         except Exception as e:
             self.query_one(Log).write_line(f"❌ Lỗi tải danh sách model: {e}")
 
