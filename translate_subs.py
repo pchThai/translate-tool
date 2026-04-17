@@ -306,8 +306,8 @@ class TranslatorTUI(App):
                     except Exception as e:
                         err = str(e).lower()
                         if "404" in err:
-                            ui_log("❌ Lỗi 404: Model không tìm thấy. Dừng chương trình.")
-                            return # Stop the worker
+                            ui_log("❌ Lỗi 404: Model không tìm thấy. Bỏ qua file này.")
+                            break # Stop processing this file, but continue the worker
                         elif "429" in err or "quota" in err:
                             retry_count += 1
                             backoff = min(60, 2 ** retry_count) # Exponential backoff
