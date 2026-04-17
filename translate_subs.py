@@ -1,12 +1,16 @@
 import os
 import time
 import argparse
+import warnings
 from collections import deque
 import google.generativeai as genai
 
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, DataTable, Log, Static
 from textual import work
+
+# Suppress the FutureWarning about the deprecation of google.generativeai
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 # ==========================================
 # 1. CẤU HÌNH API & DỊCH THUẬT
