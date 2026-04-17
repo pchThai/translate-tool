@@ -159,6 +159,7 @@ class TranslatorTUI(App):
         self.key_attempts = [0] * len(API_KEYS)
         self.key_success = [0] * len(API_KEYS)
         self.key_row_keys = []
+        self.is_running = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -200,110 +201,117 @@ class TranslatorTUI(App):
 
     @work(thread=True)
     def action_start_translation(self) -> None:
-        sys_log = self.query_one(Log)
-        ft = self.query_one("#file_table", DataTable)
-        kt = self.query_one("#key_table", DataTable)
-        sp = self.query_one("#stats_panel", Static)
-        tracker = StatsTracker()
+        if self.is_running:
+            return
+        self.is_running = True
+        
+        try:
+            sys_log = self.query_one(Log)
+            ft = self.query_one("#file_table", DataTable)
+            kt = self.query_one("#key_table", DataTable)
+            sp = self.query_one("#stats_panel", Static)
+            tracker = StatsTracker()
 
-        def ui_log(msg): self.call_from_thread(sys_log.write_line, msg)
-        def ui_up_file(rk, col, txt): self.call_from_thread(ft.update_cell, rk, self.f_cols[col], txt)
-        def ui_up_key(k_idx, status=None):
-            rk = self.key_row_keys[k_idx]
-            self.call_from_thread(kt.update_cell, rk, self.k_cols[1], str(self.key_attempts[k_idx]))
-            self.call_from_thread(kt.update_cell, rk, self.k_cols[2], str(self.key_success[k_idx]))
-            if status: self.call_from_thread(kt.update_cell, rk, self.k_cols[3], status)
-        def ui_up_stats(): self.call_from_thread(sp.update, tracker.generate_report())
+            def ui_log(msg): self.call_from_thread(sys_log.write_line, msg)
+            def ui_up_file(rk, col, txt): self.call_from_thread(ft.update_cell, rk, self.f_cols[col], txt)
+            def ui_up_key(k_idx, status=None):
+                rk = self.key_row_keys[k_idx]
+                self.call_from_thread(kt.update_cell, rk, self.k_cols[1], str(self.key_attempts[k_idx]))
+                self.call_from_thread(kt.update_cell, rk, self.k_cols[2], str(self.key_success[k_idx]))
+                if status: self.call_from_thread(kt.update_cell, rk, self.k_cols[3], status)
+            def ui_up_stats(): self.call_from_thread(sp.update, tracker.generate_report())
 
-        bot = TranslatorBot(API_KEYS, ui_log)
-        ui_up_key(bot.current_key_index, "🟢 Active")
+            bot = TranslatorBot(API_KEYS, ui_log)
+            ui_up_key(bot.current_key_index, "🟢 Active")
 
-        for item in self.missing_files:
-            ui_up_file(item["row_key"], 2, "🔄 Dịch...")
-            new_p = item["path"].rsplit('.', 1)[0] + '_vi.' + item["path"].rsplit('.', 1)[1]
-            
-            with open(item["path"], 'r', encoding='utf-8') as f:
-                content = f.read().strip()
-            
-            blocks = content.split('\n\n')
-            chunk_size = 25
-            chunks = ["\n\n".join(blocks[i:i + chunk_size]) for i in range(0, len(blocks), chunk_size)]
-            
-            chunk_idx = 0
-            ctx = ""
-            retry_count = 0 # Track retries for exponential backoff
-            
-            if os.path.exists(new_p):
-                os.remove(new_p)
-
-            while chunk_idx < len(chunks):
-                chunk_content = chunks[chunk_idx]
+            for item in self.missing_files:
+                ui_up_file(item["row_key"], 2, "🔄 Dịch...")
+                new_p = item["path"].rsplit('.', 1)[0] + '_vi.' + item["path"].rsplit('.', 1)[1]
                 
-                try:
-                    tracker.log_attempt()
-                    self.key_attempts[bot.current_key_index] += 1
-                    ui_up_key(bot.current_key_index)
-                    ui_up_stats()
+                with open(item["path"], 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                
+                blocks = content.split('\n\n')
+                chunk_size = 25
+                chunks = ["\n\n".join(blocks[i:i + chunk_size]) for i in range(0, len(blocks), chunk_size)]
+                
+                chunk_idx = 0
+                ctx = ""
+                retry_count = 0 # Track retries for exponential backoff
+                
+                if os.path.exists(new_p):
+                    os.remove(new_p)
 
-                    # Throttle: Ensure we don't exceed 15 RPM
-                    while tracker.get_rpm() >= 14:
-                        ui_log("   [!] RPM chạm đỉnh, chờ 5s...")
-                        time.sleep(5)
+                while chunk_idx < len(chunks):
+                    chunk_content = chunks[chunk_idx]
+                    
+                    try:
+                        tracker.log_attempt()
+                        self.key_attempts[bot.current_key_index] += 1
+                        ui_up_key(bot.current_key_index)
                         ui_up_stats()
 
-                    prompt = f"Dịch phụ đề IT. Ngữ cảnh: {TOPIC}. Thuật ngữ: {GLOSSARY}. Đoạn trước: {ctx[-200:]}.\n\n{chunk_content}"
-                    response = bot.model.generate_content(prompt, request_options={"timeout": 120})
-                    
-                    if not response.text: raise Exception("Empty")
-                    
-                    # Track token usage
-                    if response.usage_metadata:
-                        tracker.add_tokens(response.usage_metadata.total_token_count)
+                        # Throttle: Ensure we don't exceed 15 RPM
+                        while tracker.get_rpm() >= 14:
+                            ui_log("   [!] RPM chạm đỉnh, chờ 5s...")
+                            time.sleep(5)
+                            ui_up_stats()
 
-                    with open(new_p, 'a', encoding='utf-8') as f:
-                        f.write(response.text.strip() + "\n\n")
-                    
-                    ctx = response.text
-                    chunk_idx += 1  
-                    retry_count = 0 # Reset backoff on success
-                    time.sleep(4)  # Increased sleep to be safer (15 RPM)
-                    ui_up_stats() # Update UI with new token count
-
-                except Exception as e:
-                    err = str(e).lower()
-                    if "429" in err or "quota" in err:
-                        retry_count += 1
-                        backoff = min(60, 2 ** retry_count) # Exponential backoff
-                        ui_up_key(bot.current_key_index, f"🔴 429 (Wait {backoff}s)")
-                        ui_log(f"   [!] 429 Quota! Chờ {backoff}s và thử lại...")
-                        time.sleep(backoff)
+                        prompt = f"Dịch phụ đề IT. Ngữ cảnh: {TOPIC}. Thuật ngữ: {GLOSSARY}. Đoạn trước: {ctx[-200:]}.\n\n{chunk_content}"
+                        response = bot.model.generate_content(prompt, request_options={"timeout": 120})
                         
-                        # Rotate key if we've retried too many times on one key
-                        if retry_count > 3:
-                            if not bot.rotate_key(): 
-                                ui_log("❌ Hết sạch Key khả dụng. Dừng chương trình.")
-                                return 
-                            retry_count = 0
-                            ui_up_key(bot.current_key_index, "🟢 Active")
-                    
-                    elif "500" in err or "503" in err or "504" in err:
-                        ui_log("   [!] Server lag, chờ 10s...")
-                        time.sleep(10)
-                    else:
-                        tracker.total_failed += 1
-                        ui_up_file(item["row_key"], 2, "❌ Lỗi")
-                        ui_log(f"   [!] Lỗi không xác định: {e}")
-                        break 
+                        if not response.text: raise Exception("Empty")
+                        
+                        # Track token usage
+                        if response.usage_metadata:
+                            tracker.add_tokens(response.usage_metadata.total_token_count)
 
-            if chunk_idx == len(chunks):
-                self.key_success[bot.current_key_index] += 1
-                tracker.total_success += 1
-                ui_up_file(item["row_key"], 1, f"✅ {item['name']}")
-                ui_up_file(item["row_key"], 2, "✅ Xong")
-                ui_up_file(item["row_key"], 3, f"Key_{bot.current_key_index+1}")
-                ui_up_key(bot.current_key_index)
+                        with open(new_p, 'a', encoding='utf-8') as f:
+                            f.write(response.text.strip() + "\n\n")
+                        
+                        ctx = response.text
+                        chunk_idx += 1  
+                        retry_count = 0 # Reset backoff on success
+                        time.sleep(4)  # Increased sleep to be safer (15 RPM)
+                        ui_up_stats() # Update UI with new token count
 
-        ui_log("✅ HOÀN TẤT CHIẾN DỊCH!")
+                    except Exception as e:
+                        err = str(e).lower()
+                        if "429" in err or "quota" in err:
+                            retry_count += 1
+                            backoff = min(60, 2 ** retry_count) # Exponential backoff
+                            ui_up_key(bot.current_key_index, f"🔴 429 (Wait {backoff}s)")
+                            ui_log(f"   [!] 429 Quota! Chờ {backoff}s và thử lại...")
+                            time.sleep(backoff)
+                            
+                            # Rotate key if we've retried too many times on one key
+                            if retry_count > 3:
+                                if not bot.rotate_key(): 
+                                    ui_log("❌ Hết sạch Key khả dụng. Dừng chương trình.")
+                                    return 
+                                retry_count = 0
+                                ui_up_key(bot.current_key_index, "🟢 Active")
+                        
+                        elif "500" in err or "503" in err or "504" in err:
+                            ui_log("   [!] Server lag, chờ 10s...")
+                            time.sleep(10)
+                        else:
+                            tracker.total_failed += 1
+                            ui_up_file(item["row_key"], 2, "❌ Lỗi")
+                            ui_log(f"   [!] Lỗi không xác định: {e}")
+                            break 
+
+                if chunk_idx == len(chunks):
+                    self.key_success[bot.current_key_index] += 1
+                    tracker.total_success += 1
+                    ui_up_file(item["row_key"], 1, f"✅ {item['name']}")
+                    ui_up_file(item["row_key"], 2, "✅ Xong")
+                    ui_up_file(item["row_key"], 3, f"Key_{bot.current_key_index+1}")
+                    ui_up_key(bot.current_key_index)
+
+            ui_log("✅ HOÀN TẤT CHIẾN DỊCH!")
+        finally:
+            self.is_running = False
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
