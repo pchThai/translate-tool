@@ -75,8 +75,8 @@ class TranslatorBot:
     def setup_model(self):
         current_key = self.keys[self.current_key_index]
         genai.configure(api_key=current_key)
-        # Using the 'latest' version which is often more stable for API access
-        model_name = 'gemini-1.5-flash-latest'
+        # Using the standard model name
+        model_name = 'gemini-1.5-flash'
         self.log_fn(f"[!] Kích hoạt Key #{self.current_key_index + 1}")
         self.model = genai.GenerativeModel(model_name)
 
