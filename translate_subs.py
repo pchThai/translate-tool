@@ -2,7 +2,7 @@ import os
 import time
 import argparse
 from collections import deque
-from google import genai
+import google.genai as genai
 from google.genai import types
 
 from textual.app import App, ComposeResult
