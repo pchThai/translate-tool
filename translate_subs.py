@@ -284,48 +284,4 @@ class TranslatorTUI(App):
                         chunk_idx += 1  
                         retry_count = 0 # Reset backoff on success
                         time.sleep(4)  # Increased sleep to be safer (15 RPM)
-                        ui_up_stats() # Update UI with new token count
-
-                    except Exception as e:
-                        err = str(e).lower()
-                        if "429" in err or "quota" in err:
-                            retry_count += 1
-                            backoff = min(60, 2 ** retry_count) # Exponential backoff
-                            ui_up_key(bot.current_key_index, f"🔴 429 (Wait {backoff}s)")
-                            ui_log(f"   [!] 429 Quota! Chờ {backoff}s và thử lại...")
-                            time.sleep(backoff)
-                            
-                            # Rotate key if we've retried too many times on one key
-                            if retry_count > 3:
-                                if not bot.rotate_key(): 
-                                    ui_log("❌ Hết sạch Key khả dụng. Dừng chương trình.")
-                                    return 
-                                retry_count = 0
-                                ui_up_key(bot.current_key_index, "🟢 Active")
-                        
-                        elif "500" in err or "503" in err or "504" in err:
-                            ui_log("   [!] Server lag, chờ 10s...")
-                            time.sleep(10)
-                        else:
-                            tracker.total_failed += 1
-                            ui_up_file(item["row_key"], 2, "❌ Lỗi")
-                            ui_log(f"   [!] Lỗi không xác định: {e}")
-                            break 
-
-                if chunk_idx == len(chunks):
-                    self.key_success[bot.current_key_index] += 1
-                    tracker.total_success += 1
-                    ui_up_file(item["row_key"], 1, f"✅ {item['name']}")
-                    ui_up_file(item["row_key"], 2, "✅ Xong")
-                    ui_up_file(item["row_key"], 3, f"Key_{bot.current_key_index+1}")
-                    ui_up_key(bot.current_key_index)
-
-            ui_log("✅ HOÀN TẤT CHIẾN DỊCH!")
-        finally:
-            self.is_running = False
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-d", "--dir", required=True)
-    app = TranslatorTUI(target_dir=os.path.abspath(os.path.expanduser(parser.parse_args().dir)))
-    app.run()
+                        ui_up_stats() # Update
