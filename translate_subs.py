@@ -75,7 +75,7 @@ class TranslatorBot:
     def setup_model(self):
         current_key = self.keys[self.current_key_index]
         genai.configure(api_key=current_key)
-        # Using the standard model name without 'models/' prefix
+        # Using the standard model name
         model_name = 'gemini-1.5-flash'
         self.log_fn(f"[!] Kích hoạt Key #{self.current_key_index + 1}")
         self.model = genai.GenerativeModel(model_name)
@@ -290,7 +290,10 @@ class TranslatorTUI(App):
 
                     except Exception as e:
                         err = str(e).lower()
-                        if "429" in err or "quota" in err:
+                        if "404" in err:
+                            ui_log("❌ Lỗi 404: Model không tìm thấy. Dừng chương trình.")
+                            return # Stop the worker
+                        elif "429" in err or "quota" in err:
                             retry_count += 1
                             backoff = min(60, 2 ** retry_count) # Exponential backoff
                             ui_up_key(bot.current_key_index, f"🔴 429 (Wait {backoff}s)")
@@ -321,6 +324,8 @@ class TranslatorTUI(App):
                     ui_up_file(item["row_key"], 2, "✅ Xong")
                     ui_up_file(item["row_key"], 3, f"Key_{bot.current_key_index+1}")
                     ui_up_key(bot.current_key_index)
+                
+                time.sleep(1) # Small delay between files
 
             ui_log("✅ HOÀN TẤT CHIẾN DỊCH!")
         finally:
