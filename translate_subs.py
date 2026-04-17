@@ -168,7 +168,7 @@ class TranslatorTUI(App):
         self.key_attempts = [0] * len(API_KEYS)
         self.key_success = [0] * len(API_KEYS)
         self.key_row_keys = []
-        self.is_running = False
+        self.translation_is_running = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -210,9 +210,9 @@ class TranslatorTUI(App):
 
     @work(thread=True)
     def action_start_translation(self) -> None:
-        if self.is_running:
+        if self.translation_is_running:
             return
-        self.is_running = True
+        self.translation_is_running = True
         
         try:
             sys_log = self.query_one(Log)
@@ -322,7 +322,7 @@ class TranslatorTUI(App):
 
             ui_log("✅ HOÀN TẤT CHIẾN DỊCH!")
         finally:
-            self.is_running = False
+            self.translation_is_running = False
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
