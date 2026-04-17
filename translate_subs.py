@@ -75,7 +75,7 @@ class TranslatorBot:
     def setup_model(self):
         current_key = self.keys[self.current_key_index]
         genai.configure(api_key=current_key)
-        # Using the standard model name for google.generativeai
+        # Using the standard model name
         model_name = 'gemini-1.5-flash'
         self.log_fn(f"[!] Kích hoạt Key #{self.current_key_index + 1}")
         self.model = genai.GenerativeModel(model_name)
@@ -208,12 +208,14 @@ class TranslatorTUI(App):
                     
         sys_log.write_line(f"[*] Tìm thấy {len(self.missing_files)} file HỢP LỆ cần dịch.")
 
-    @work(thread=True)
     def action_start_translation(self) -> None:
         if self.translation_is_running:
             return
         self.translation_is_running = True
-        
+        self.run_translation_worker()
+
+    @work(thread=True)
+    def run_translation_worker(self) -> None:
         try:
             sys_log = self.query_one(Log)
             ft = self.query_one("#file_table", DataTable)
