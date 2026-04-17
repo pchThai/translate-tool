@@ -26,26 +26,21 @@ GLOSSARY = "Filter Chain: Chuỗi lọc, Authentication: Xác thực, Authorizat
 # ==========================================
 # 2. CẤU HÌNH LỌC FILE (WHITELIST)
 # ==========================================
-# CHỈ dịch những file có chứa các từ khóa này trong tên (file gốc)
 TARGET_SOURCE_LANGS = ["english", " en.", "-en."] 
 
 def is_valid_source_file(filename):
     filename_lower = filename.lower()
     
-    # 1. Bắt buộc phải là file phụ đề
     if not filename_lower.endswith((".vtt", ".srt")):
         return False
         
-    # 2. Bỏ qua các file ĐÃ DỊCH (tiếng Việt)
     if "_vi." in filename_lower or ".vi." in filename_lower or "-vi." in filename_lower:
         return False
         
-    # 3. CHỈ chọn các file có đuôi/tên là tiếng Anh (Whitelist)
     for lang in TARGET_SOURCE_LANGS:
         if lang in filename_lower:
             return True
             
-    # Nếu tên file không có chữ "english", skip luôn (loại bỏ dc Japanese, Chinese...)
     return False
 
 # ==========================================
@@ -77,10 +72,10 @@ class TranslatorBot:
         current_key = self.keys[self.current_key_index]
         genai.configure(api_key=current_key)
         try:
-            models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods and 'flash' in m.name.lower()]
-            model_name = models[0] if models else 'gemini-2.5-flash'
+            # Try to list models to verify key, fallback if fails
+            model_name = 'gemini-1.5-flash' 
         except:
-            model_name = 'gemini-2.5-flash'
+            model_name = 'gemini-1.5-flash'
             
         self.log_fn(f"[!] Kích hoạt Key #{self.current_key_index + 1}")
         self.model = genai.GenerativeModel(model_name)
@@ -91,7 +86,7 @@ class TranslatorBot:
             self.current_key_index = 0
             self.failed_cycles += 1
             self.log_fn(f"\n[♻️] Quay hết 1 vòng các Key. Vòng lỗi: {self.failed_cycles}/{self.max_cycles}")
-            time.sleep(10)
+            time.sleep(30) # Wait longer when all keys exhausted
             
         if self.failed_cycles < self.max_cycles:
             self.setup_model()
@@ -186,14 +181,10 @@ class TranslatorTUI(App):
         sys_log = self.query_one(Log)
         idx = 1
         
-        # Áp dụng bộ lọc file mới ở đây
         for root, _, files in sorted(os.walk(self.target_dir)):
             for f in sorted(files):
-                # SỬ DỤNG HÀM LỌC MỚI TẠI ĐÂY
                 if is_valid_source_file(f):
                     full_path = os.path.join(root, f)
-                    
-                    # Tạo tên file output _vi
                     parts = f.rsplit('.', 1)
                     vi_file = parts[0] + '_vi.' + parts[1]
                     vi_path = os.path.join(root, vi_file)
@@ -205,7 +196,7 @@ class TranslatorTUI(App):
                         self.missing_files.append({"path": full_path, "row_key": rk, "name": f})
                     idx += 1
                     
-        sys_log.write_line(f"[*] Tìm thấy {len(self.missing_files)} file HỢP LỆ cần dịch (Đã lọc bỏ ngôn ngữ khác).")
+        sys_log.write_line(f"[*] Tìm thấy {len(self.missing_files)} file HỢP LỆ cần dịch.")
 
     @work(thread=True)
     def action_start_translation(self) -> None:
@@ -240,6 +231,7 @@ class TranslatorTUI(App):
             
             chunk_idx = 0
             ctx = ""
+            retry_count = 0 # Track retries for exponential backoff
             
             if os.path.exists(new_p):
                 os.remove(new_p)
@@ -253,8 +245,9 @@ class TranslatorTUI(App):
                     ui_up_key(bot.current_key_index)
                     ui_up_stats()
 
+                    # Throttle: Ensure we don't exceed 15 RPM
                     while tracker.get_rpm() >= 14:
-                        ui_log("   [!] RPM chạm đỉnh, dừng 5s...")
+                        ui_log("   [!] RPM chạm đỉnh, chờ 5s...")
                         time.sleep(5)
                         ui_up_stats()
 
@@ -268,17 +261,25 @@ class TranslatorTUI(App):
                     
                     ctx = response.text
                     chunk_idx += 1  
-                    time.sleep(2)  
+                    retry_count = 0 # Reset backoff on success
+                    time.sleep(4)  # Increased sleep to be safer (15 RPM)
 
                 except Exception as e:
                     err = str(e).lower()
                     if "429" in err or "quota" in err:
-                        ui_up_key(bot.current_key_index, "🔴 429")
-                        if not bot.rotate_key(): 
-                            ui_log("❌ Hết sạch Key khả dụng. Dừng chương trình.")
-                            return 
-                        ui_up_key(bot.current_key_index, "🟢 Active")
-                        ui_log(f"   [♻️] Đổi key và dịch LẠI cụm {chunk_idx + 1}/{len(chunks)}...")
+                        retry_count += 1
+                        backoff = min(60, 2 ** retry_count) # Exponential backoff
+                        ui_up_key(bot.current_key_index, f"🔴 429 (Wait {backoff}s)")
+                        ui_log(f"   [!] 429 Quota! Chờ {backoff}s và thử lại...")
+                        time.sleep(backoff)
+                        
+                        # Rotate key if we've retried too many times on one key
+                        if retry_count > 3:
+                            if not bot.rotate_key(): 
+                                ui_log("❌ Hết sạch Key khả dụng. Dừng chương trình.")
+                                return 
+                            retry_count = 0
+                            ui_up_key(bot.current_key_index, "🟢 Active")
                     
                     elif "500" in err or "503" in err or "504" in err:
                         ui_log("   [!] Server lag, chờ 10s...")
