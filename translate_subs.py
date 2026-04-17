@@ -203,18 +203,7 @@ class TranslatorTUI(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        # Load models in background or on mount
-        try:
-            models = TranslatorBot.get_available_models(API_KEYS)
-            select = self.query_one("#model_select", Select)
-            if models:
-                select.set_options(models)
-                select.prompt = "Chọn Model"
-            else:
-                select.prompt = "Không tìm thấy model!"
-        except Exception as e:
-            self.query_one(Log).write_line(f"❌ Lỗi tải danh sách model: {e}")
-
+        # Initialize UI tables
         ft = self.query_one("#file_table", DataTable)
         self.f_cols = ft.add_columns("STT", "Tên File", "Trạng Thái", "Key")
         
@@ -243,6 +232,25 @@ class TranslatorTUI(App):
                     idx += 1
                     
         sys_log.write_line(f"[*] Tìm thấy {len(self.missing_files)} file HỢP LỆ cần dịch.")
+        
+        # Trigger async model loading
+        self.load_models_async()
+
+    @work(thread=True)
+    def load_models_async(self) -> None:
+        try:
+            models = TranslatorBot.get_available_models(API_KEYS)
+            self.call_from_thread(self.update_model_select, models)
+        except Exception as e:
+            self.call_from_thread(self.query_one(Log).write_line, f"❌ Lỗi tải danh sách model: {e}")
+
+    def update_model_select(self, models):
+        select = self.query_one("#model_select", Select)
+        if models:
+            select.set_options(models)
+            select.prompt = "Chọn Model"
+        else:
+            select.prompt = "Không tìm thấy model!"
 
     def action_start_translation(self) -> None:
         if self.translation_is_running:
