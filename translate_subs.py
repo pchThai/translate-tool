@@ -71,12 +71,8 @@ class TranslatorBot:
     def setup_model(self):
         current_key = self.keys[self.current_key_index]
         genai.configure(api_key=current_key)
-        try:
-            # Try to list models to verify key, fallback if fails
-            model_name = 'gemini-1.5-flash' 
-        except:
-            model_name = 'gemini-1.5-flash'
-            
+        # Using the standard model name. If 404 persists, check if your API key has access to this model.
+        model_name = 'gemini-1.5-flash'
         self.log_fn(f"[!] Kích hoạt Key #{self.current_key_index + 1}")
         self.model = genai.GenerativeModel(model_name)
 
