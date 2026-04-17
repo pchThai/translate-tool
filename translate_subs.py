@@ -6,7 +6,7 @@ from collections import deque
 import google.generativeai as genai
 
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, DataTable, Log, Static
+from textual.widgets import Header, Footer, DataTable, Log, Static, Select
 from textual import work
 
 # Suppress the FutureWarning about the deprecation of google.generativeai
@@ -63,22 +63,21 @@ def is_valid_translation(file_path):
 # 4. QUẢN LÝ BOT API
 # ==========================================
 class TranslatorBot:
-    def __init__(self, keys, log_fn):
+    def __init__(self, keys, log_fn, model_name):
         self.keys = keys
         self.current_key_index = 0
         self.model = None
         self.failed_cycles = 0
         self.max_cycles = 5
         self.log_fn = log_fn  
+        self.model_name = model_name
         self.setup_model()
 
     def setup_model(self):
         current_key = self.keys[self.current_key_index]
         genai.configure(api_key=current_key)
-        # Using the standard model name
-        model_name = 'gemini-1.5-flash'
-        self.log_fn(f"[!] Kích hoạt Key #{self.current_key_index + 1}")
-        self.model = genai.GenerativeModel(model_name)
+        self.log_fn(f"[!] Kích hoạt Key #{self.current_key_index + 1} với model {self.model_name}")
+        self.model = genai.GenerativeModel(self.model_name)
 
     def generate_content(self, prompt):
         # Using the legacy client structure
@@ -136,14 +135,18 @@ class TranslatorTUI(App):
     CSS = """
     Screen {
         layout: grid;
-        grid-size: 4 3;
-        grid-rows: 3 2fr 1fr;
+        grid-size: 4 4;
+        grid-rows: 3 1 2fr 1fr;
     }
     #stats_panel {
         column-span: 4;
         border: double cyan;
         content-align: center middle;
         background: $surface;
+    }
+    #model_select {
+        column-span: 4;
+        height: 3;
     }
     #file_table {
         column-span: 3;
@@ -173,6 +176,12 @@ class TranslatorTUI(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield Static("Đang khởi tạo...", id="stats_panel")
+        yield Select(
+            options=[("Gemini 1.5 Flash", "gemini-1.5-flash"), ("Gemini 1.5 Pro", "gemini-1.5-pro")],
+            value="gemini-1.5-flash",
+            id="model_select",
+            prompt="Chọn Model"
+        )
         yield DataTable(id="file_table")
         yield DataTable(id="key_table")
         yield Log(id="sys_log")
@@ -221,6 +230,9 @@ class TranslatorTUI(App):
             ft = self.query_one("#file_table", DataTable)
             kt = self.query_one("#key_table", DataTable)
             sp = self.query_one("#stats_panel", Static)
+            model_select = self.query_one("#model_select", Select)
+            
+            selected_model = model_select.value
             tracker = StatsTracker()
 
             def ui_log(msg): self.call_from_thread(sys_log.write_line, msg)
@@ -232,7 +244,7 @@ class TranslatorTUI(App):
                 if status: self.call_from_thread(kt.update_cell, rk, self.k_cols[3], status)
             def ui_up_stats(): self.call_from_thread(sp.update, tracker.generate_report())
 
-            bot = TranslatorBot(API_KEYS, ui_log)
+            bot = TranslatorBot(API_KEYS, ui_log, selected_model)
             ui_up_key(bot.current_key_index, "🟢 Active")
 
             for item in self.missing_files:
