@@ -67,10 +67,10 @@ class TranslatorBot:
         self.keys = keys
         self.current_key_index = 0
         self.model = None
-        self.failed_cycles = 0
-        self.max_cycles = 5
         self.log_fn = log_fn  
         self.model_name = model_name
+        # Circuit Breaker: Track health of each key
+        self.key_health = {i: {"blocked_until": 0} for i in range(len(keys))}
         self.setup_model()
 
     def setup_model(self):
@@ -96,21 +96,19 @@ class TranslatorBot:
         return []
 
     def generate_content(self, prompt):
-        # Using the legacy client structure
-        response = self.model.generate_content(prompt, request_options={"timeout": 120})
-        return response
+        return self.model.generate_content(prompt, request_options={"timeout": 120})
 
-    def rotate_key(self):
-        self.current_key_index += 1
-        if self.current_key_index >= len(self.keys):
-            self.current_key_index = 0
-            self.failed_cycles += 1
-            self.log_fn(f"\n[♻️] Quay hết 1 vòng các Key. Vòng lỗi: {self.failed_cycles}/{self.max_cycles}")
-            time.sleep(60) # Wait longer when all keys exhausted
-            
-        if self.failed_cycles < self.max_cycles:
-            self.setup_model()
-            return True
+    def mark_key_blocked(self, index, duration=60):
+        """Circuit Breaker: Mark a key as blocked for a duration."""
+        self.key_health[index]["blocked_until"] = time.time() + duration
+        self.log_fn(f"[!] Key #{index+1} bị chặn trong {duration}s do Quota.")
+
+    def get_next_available_key(self):
+        """Find the next key that isn't blocked."""
+        for _ in range(len(self.keys)):
+            self.current_key_index = (self.current_key_index + 1) % len(self.keys)
+            if time.time() > self.key_health[self.current_key_index]["blocked_until"]:
+                return True
         return False
 
 # ==========================================
@@ -203,7 +201,6 @@ class TranslatorTUI(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        # Initialize UI tables
         ft = self.query_one("#file_table", DataTable)
         self.f_cols = ft.add_columns("STT", "Tên File", "Trạng Thái", "Key")
         
@@ -232,8 +229,6 @@ class TranslatorTUI(App):
                     idx += 1
                     
         sys_log.write_line(f"[*] Tìm thấy {len(self.missing_files)} file HỢP LỆ cần dịch.")
-        
-        # Trigger async model loading
         self.load_models_async()
 
     @work(thread=True)
@@ -267,7 +262,6 @@ class TranslatorTUI(App):
             sp = self.query_one("#stats_panel", Static)
             model_select = self.query_one("#model_select", Select)
             
-            # Fix: Check if value is a string (valid selection)
             if not isinstance(model_select.value, str):
                 sys_log.write_line("❌ Vui lòng chọn model trước!")
                 return
@@ -300,7 +294,6 @@ class TranslatorTUI(App):
                 
                 chunk_idx = 0
                 ctx = ""
-                retry_count = 0 # Track retries for exponential backoff
                 
                 if os.path.exists(new_p):
                     os.remove(new_p)
@@ -314,23 +307,18 @@ class TranslatorTUI(App):
                         ui_up_key(bot.current_key_index)
                         ui_up_stats()
 
-                        # Throttle: Ensure we don't exceed 10 RPM (Conservative)
                         while tracker.get_rpm() >= 10:
                             ui_log("   [!] RPM chạm ngưỡng, chờ 6s...")
                             time.sleep(6)
                             ui_up_stats()
 
                         prompt = f"Dịch phụ đề IT. Ngữ cảnh: {TOPIC}. Thuật ngữ: {GLOSSARY}. Đoạn trước: {ctx[-200:]}.\n\n{chunk_content}"
-                        
-                        # Explicit delay before call
                         time.sleep(3)
                         
-                        # Using the legacy client method
                         response = bot.generate_content(prompt)
                         
                         if not response.text: raise Exception("Empty")
                         
-                        # Track token usage
                         if response.usage_metadata:
                             tracker.add_tokens(response.usage_metadata.total_token_count)
 
@@ -339,28 +327,25 @@ class TranslatorTUI(App):
                         
                         ctx = response.text
                         chunk_idx += 1  
-                        retry_count = 0 # Reset backoff on success
-                        time.sleep(5)  # Increased sleep to be safer
-                        ui_up_stats() # Update UI with new token count
+                        time.sleep(5)
+                        ui_up_stats()
 
                     except Exception as e:
                         err = str(e).lower()
                         if "404" in err:
                             ui_log(f"❌ Lỗi 404: Model '{selected_model}' không tìm thấy. Bỏ qua file này.")
-                            break # Stop processing this file, but continue the worker
+                            break 
                         elif "429" in err or "quota" in err:
-                            retry_count += 1
-                            backoff = min(120, 2 ** (retry_count + 2)) # Exponential backoff
-                            ui_up_key(bot.current_key_index, f"🔴 429 (Wait {backoff}s)")
-                            ui_log(f"   [!] 429 Quota! Chờ {backoff}s và thử lại...")
-                            time.sleep(backoff)
+                            # Circuit Breaker: Block this key
+                            bot.mark_key_blocked(bot.current_key_index)
+                            ui_up_key(bot.current_key_index, "🔴 Quota")
                             
-                            # Rotate key if we've retried too many times on one key
-                            if retry_count > 2:
-                                if not bot.rotate_key(): 
-                                    ui_log("❌ Hết sạch Key khả dụng. Dừng chương trình.")
-                                    return 
-                                retry_count = 0
+                            # Find next key
+                            if not bot.get_next_available_key():
+                                ui_log("❌ Hết sạch Key khả dụng. Chờ 60s...")
+                                time.sleep(60)
+                            else:
+                                bot.setup_model()
                                 ui_up_key(bot.current_key_index, "🟢 Active")
                         
                         elif "500" in err or "503" in err or "504" in err:
@@ -380,7 +365,7 @@ class TranslatorTUI(App):
                     ui_up_file(item["row_key"], 3, f"Key_{bot.current_key_index+1}")
                     ui_up_key(bot.current_key_index)
                 
-                time.sleep(2) # Small delay between files
+                time.sleep(2)
 
             ui_log("✅ HOÀN TẤT CHIẾN DỊCH!")
         finally:
