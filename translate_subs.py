@@ -79,6 +79,16 @@ class TranslatorBot:
         self.log_fn(f"[!] Kích hoạt Key #{self.current_key_index + 1} với model {self.model_name}")
         self.model = genai.GenerativeModel(self.model_name)
 
+    @staticmethod
+    def get_available_models(api_key):
+        """Fetch models that support generateContent."""
+        genai.configure(api_key=api_key)
+        models = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                models.append((m.display_name, m.name))
+        return models
+
     def generate_content(self, prompt):
         # Using the legacy client structure
         response = self.model.generate_content(prompt, request_options={"timeout": 120})
@@ -177,10 +187,9 @@ class TranslatorTUI(App):
         yield Header()
         yield Static("Đang khởi tạo...", id="stats_panel")
         yield Select(
-            options=[("Gemini 1.5 Flash", "gemini-1.5-flash"), ("Gemini 1.5 Pro", "gemini-1.5-pro")],
-            value="gemini-1.5-flash",
+            options=[],
             id="model_select",
-            prompt="Chọn Model"
+            prompt="Đang tải danh sách model..."
         )
         yield DataTable(id="file_table")
         yield DataTable(id="key_table")
@@ -188,6 +197,15 @@ class TranslatorTUI(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        # Load models in background or on mount
+        try:
+            models = TranslatorBot.get_available_models(API_KEYS[0])
+            select = self.query_one("#model_select", Select)
+            select.set_options(models)
+            select.prompt = "Chọn Model"
+        except Exception as e:
+            self.query_one(Log).write_line(f"❌ Lỗi tải danh sách model: {e}")
+
         ft = self.query_one("#file_table", DataTable)
         self.f_cols = ft.add_columns("STT", "Tên File", "Trạng Thái", "Key")
         
@@ -232,6 +250,10 @@ class TranslatorTUI(App):
             sp = self.query_one("#stats_panel", Static)
             model_select = self.query_one("#model_select", Select)
             
+            if model_select.value is None:
+                sys_log.write_line("❌ Vui lòng chọn model trước!")
+                return
+
             selected_model = model_select.value
             tracker = StatsTracker()
 
@@ -306,7 +328,7 @@ class TranslatorTUI(App):
                     except Exception as e:
                         err = str(e).lower()
                         if "404" in err:
-                            ui_log("❌ Lỗi 404: Model không tìm thấy. Bỏ qua file này.")
+                            ui_log(f"❌ Lỗi 404: Model '{selected_model}' không tìm thấy. Bỏ qua file này.")
                             break # Stop processing this file, but continue the worker
                         elif "429" in err or "quota" in err:
                             retry_count += 1
