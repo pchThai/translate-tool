@@ -2,7 +2,8 @@ import os
 import time
 import argparse
 from collections import deque
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, DataTable, Log, Static
@@ -62,19 +63,25 @@ class TranslatorBot:
     def __init__(self, keys, log_fn):
         self.keys = keys
         self.current_key_index = 0
-        self.model = None
+        self.client = None
         self.failed_cycles = 0
         self.max_cycles = 5
         self.log_fn = log_fn  
-        self.setup_model()
+        self.setup_client()
 
-    def setup_model(self):
+    def setup_client(self):
         current_key = self.keys[self.current_key_index]
-        genai.configure(api_key=current_key)
-        # Using the 'models/' prefix to ensure the API correctly resolves the model resource.
-        model_name = 'models/gemini-1.5-flash'
+        # Initialize the new GenAI client
+        self.client = genai.Client(api_key=current_key)
         self.log_fn(f"[!] Kích hoạt Key #{self.current_key_index + 1}")
-        self.model = genai.GenerativeModel(model_name)
+
+    def generate_content(self, prompt):
+        # Using the new client structure
+        response = self.client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=prompt,
+        )
+        return response
 
     def rotate_key(self):
         self.current_key_index += 1
@@ -85,7 +92,7 @@ class TranslatorBot:
             time.sleep(30) # Wait longer when all keys exhausted
             
         if self.failed_cycles < self.max_cycles:
-            self.setup_model()
+            self.setup_client()
             return True
         return False
 
@@ -258,7 +265,9 @@ class TranslatorTUI(App):
                             ui_up_stats()
 
                         prompt = f"Dịch phụ đề IT. Ngữ cảnh: {TOPIC}. Thuật ngữ: {GLOSSARY}. Đoạn trước: {ctx[-200:]}.\n\n{chunk_content}"
-                        response = bot.model.generate_content(prompt, request_options={"timeout": 120})
+                        
+                        # Using the new client method
+                        response = bot.generate_content(prompt)
                         
                         if not response.text: raise Exception("Empty")
                         
