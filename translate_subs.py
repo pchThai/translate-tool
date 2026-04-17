@@ -267,7 +267,8 @@ class TranslatorTUI(App):
             sp = self.query_one("#stats_panel", Static)
             model_select = self.query_one("#model_select", Select)
             
-            if model_select.value is None:
+            # Fix: Check if value is a string (valid selection)
+            if not isinstance(model_select.value, str):
                 sys_log.write_line("❌ Vui lòng chọn model trước!")
                 return
 
