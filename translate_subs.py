@@ -70,7 +70,8 @@ class TranslatorBot:
         self.log_fn = log_fn  
         self.model_name = model_name
         # Circuit Breaker: Track health of each key
-        self.key_health = {i: {"blocked_until": 0} for i in range(len(keys))}
+        # failure_count: number of consecutive 429s
+        self.key_health = {i: {"blocked_until": 0, "failure_count": 0} for i in range(len(keys))}
         self.setup_model()
 
     def setup_model(self):
@@ -98,10 +99,18 @@ class TranslatorBot:
     def generate_content(self, prompt):
         return self.model.generate_content(prompt, request_options={"timeout": 120})
 
-    def mark_key_blocked(self, index, duration=60):
-        """Circuit Breaker: Mark a key as blocked for a duration."""
+    def mark_key_blocked(self, index):
+        """Circuit Breaker: Mark a key as blocked with exponential backoff."""
+        self.key_health[index]["failure_count"] += 1
+        # Backoff: 60s, 120s, 240s, 480s...
+        duration = 60 * (2 ** (self.key_health[index]["failure_count"] - 1))
         self.key_health[index]["blocked_until"] = time.time() + duration
-        self.log_fn(f"[!] Key #{index+1} bị chặn trong {duration}s do Quota.")
+        self.log_fn(f"[!] Key #{index+1} bị chặn trong {duration}s (Lỗi liên tiếp: {self.key_health[index]['failure_count']})")
+
+    def reset_key_health(self, index):
+        """Reset failure count on success."""
+        self.key_health[index]["failure_count"] = 0
+        self.key_health[index]["blocked_until"] = 0
 
     def get_next_available_key(self):
         """Find the next key that isn't blocked."""
@@ -319,6 +328,9 @@ class TranslatorTUI(App):
                         
                         if not response.text: raise Exception("Empty")
                         
+                        # Success: Reset health
+                        bot.reset_key_health(bot.current_key_index)
+                        
                         if response.usage_metadata:
                             tracker.add_tokens(response.usage_metadata.total_token_count)
 
@@ -336,7 +348,7 @@ class TranslatorTUI(App):
                             ui_log(f"❌ Lỗi 404: Model '{selected_model}' không tìm thấy. Bỏ qua file này.")
                             break 
                         elif "429" in err or "quota" in err:
-                            # Circuit Breaker: Block this key
+                            # Circuit Breaker: Block this key with exponential backoff
                             bot.mark_key_blocked(bot.current_key_index)
                             ui_up_key(bot.current_key_index, "🔴 Quota")
                             
