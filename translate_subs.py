@@ -30,7 +30,7 @@ GLOSSARY = "Filter Chain: Chuỗi lọc, Authentication: Xác thực, Authorizat
 # ==========================================
 # 2. CẤU HÌNH LỌC FILE (WHITELIST)
 # ==========================================
-TARGET_SOURCE_LANGS = ["english", " en.", "-en."] 
+TARGET_SOURCE_LANGS = ["english", " en.", "-en.", "_en."] 
 
 def is_valid_source_file(filename):
     filename_lower = filename.lower()
@@ -253,6 +253,8 @@ class TranslatorTUI(App):
         if models:
             select.set_options(models)
             select.prompt = "Chọn Model"
+            # Set default value to the first model to avoid "double click" issue
+            select.value = models[0][1]
         else:
             select.prompt = "Không tìm thấy model!"
 
