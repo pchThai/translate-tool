@@ -226,8 +226,8 @@ class TranslatorTUI(App):
             for f in sorted(files):
                 if is_valid_source_file(f):
                     full_path = os.path.join(root, f)
-                    parts = f.rsplit('.', 1)
-                    vi_file = parts[0] + '_vi.' + parts[1]
+                    base, ext = os.path.splitext(f)
+                    vi_file = f"{base}_vi{ext}"
                     vi_path = os.path.join(root, vi_file)
                     
                     if is_valid_translation(vi_path):
@@ -294,7 +294,8 @@ class TranslatorTUI(App):
 
             for item in self.missing_files:
                 ui_up_file(item["row_key"], 2, "🔄 Dịch...")
-                new_p = item["path"].rsplit('.', 1)[0] + '_vi.' + item["path"].rsplit('.', 1)[1]
+                base, ext = os.path.splitext(item["path"])
+                new_p = f"{base}_vi{ext}"
                 
                 with open(item["path"], 'r', encoding='utf-8') as f:
                     content = f.read().strip()
