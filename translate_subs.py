@@ -59,7 +59,7 @@ def is_valid_translation(file_path):
     if not os.path.exists(file_path): return False
     if os.path.getsize(file_path) < 100: return False
     try:
-        with open(file_path, 'r', encoding='utf-8sig-sig') as f:
+        with open(file_path, 'r', encoding='utf-8-sig') as f:
             if "-->" not in f.read(): return False
     except: return False
     return True
