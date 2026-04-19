@@ -3,6 +3,7 @@ import time
 import argparse
 import warnings
 from collections import deque
+from dotenv import load_dotenv 
 import google.generativeai as genai
 import re 
 from textual.app import App, ComposeResult
@@ -15,14 +16,18 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 # ==========================================
 # 1. CẤU HÌNH API & DỊCH THUẬT
 # ==========================================
-API_KEYS = [
-    "AIzaSyCEs_tbpa-_FyqU3yPQKbHTHuO2CLzn9f8", # Futoshi
-    "AIzaSyCfvmAAtudh4QYkl7qOGjX6m-9NYAvzS-g", # Detu
-    "AIzaSyBd9l3RvvrNV6e4r3ISGkztg8ogk_lVj1Q", # pch
-    "AIzaSyDLWMWDno-uOlfAMwsC387a3O2bQM2M-N0", # tamano
-    "AIzaSyB9xWxvaVWAnzN0cQ4-1mKnI1IgbX0jIww", # Arisu
-    "AIzaSyAr5Pbs8Vbr5gEDhmTtpjaPkl1aVuvvmkk"  # Yuki
-]
+# Tải các biến môi trường từ file .env
+load_dotenv()
+
+# Lấy API_KEYS từ biến môi trường. Các keys phải được phân tách bằng dấu phẩy.
+# Ví dụ trong file .env: GEMINI_API_KEYS="key1,key2,key3"
+env_api_keys = os.environ.get('GEMINI_API_KEYS')
+if not env_api_keys:
+    raise ValueError("Biến môi trường 'GEMINI_API_KEYS' chưa được thiết lập. Vui lòng thiết lập biến này với các khóa API được phân tách bằng dấu phẩy trong file .env.")
+API_KEYS = [key.strip() for key in env_api_keys.split(',') if key.strip()]
+
+if not API_KEYS:
+    raise ValueError("Không tìm thấy khóa API hợp lệ nào trong biến môi trường 'GEMINI_API_KEYS'.")
 
 TOPIC = "Spring Security 6, JWT, OAuth2, Microservices"
 GLOSSARY = "Filter Chain: Chuỗi lọc, Authentication: Xác thực, Authorization: Phân quyền, Principal: Đối tượng thực thể"
