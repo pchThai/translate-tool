@@ -4,7 +4,7 @@ import argparse
 import warnings
 from collections import deque
 import google.generativeai as genai
-
+import re 
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, DataTable, Log, Static, Select
 from textual import work
@@ -54,7 +54,7 @@ def is_valid_translation(file_path):
     if not os.path.exists(file_path): return False
     if os.path.getsize(file_path) < 100: return False
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, 'r', encoding='utf-8sig-sig') as f:
             if "-->" not in f.read(): return False
     except: return False
     return True
@@ -185,7 +185,7 @@ class TranslatorTUI(App):
     }
     """
 
-    BINDINGS = [("s", "start_translation", "Bắt đầu"), ("q", "quit", "Thoát")]
+    BINDINGS = [("s", "start_translation", "Bắt đầu"),("f", "format_subs", "Format chuẩn"), ("q", "quit", "Thoát")]
 
     def __init__(self, target_dir: str):
         super().__init__()
@@ -297,8 +297,9 @@ class TranslatorTUI(App):
                 base, ext = os.path.splitext(item["path"])
                 new_p = f"{base}_vi{ext}"
                 
-                with open(item["path"], 'r', encoding='utf-8') as f:
+                with open(item["path"], 'r', encoding='utf-8-sig') as f:
                     content = f.read().strip()
+                    content = content.replace('\ufeff', '')
                 
                 blocks = content.split('\n\n')
                 chunk_size = 25
@@ -337,7 +338,7 @@ class TranslatorTUI(App):
                         if response.usage_metadata:
                             tracker.add_tokens(response.usage_metadata.total_token_count)
 
-                        with open(new_p, 'a', encoding='utf-8') as f:
+                        with open(new_p, 'a', encoding='utf-8-sig') as f:
                             f.write(response.text.strip() + "\n\n")
                         
                         ctx = response.text
@@ -385,7 +386,89 @@ class TranslatorTUI(App):
             ui_log("✅ HOÀN TẤT CHIẾN DỊCH!")
         finally:
             self.translation_is_running = False
-
+    @work(thread=True)
+    def action_format_subs(self) -> None:
+        sys_log = self.query_one(Log)
+        self.call_from_thread(sys_log.write_line, "[*] Đang tiến hành chuẩn hóa siêu cấp và dọn rác AI cho các file phụ đề (_vi)...")
+        
+        count = 0
+        for root, _, files in os.walk(self.target_dir):
+            for f in files:
+                if (f.endswith(".srt") or f.endswith(".vtt")) and "_vi" in f:
+                    file_path = os.path.join(root, f)
+                    try:
+                        with open(file_path, 'r', encoding='utf-8-sig') as file:
+                            content = file.read()
+                            content = content.replace('\ufeff', '')
+                        is_srt = f.endswith(".srt")
+                        
+                        # Quét tìm TẤT CẢ các mốc thời gian chuẩn (SRT dùng phẩy, VTT dùng chấm)
+                        # Hỗ trợ sửa luôn lỗi AI gõ sai mũi tên (-> hoặc --->)
+                        timecode_pattern = r'(\d{2}:\d{2}:\d{2}[.,]\d{3}\s*-+>\s*\d{2}:\d{2}:\d{2}[.,]\d{3}|\d{2}:\d{2}[.,]\d{3}\s*-+>\s*\d{2}:\d{2}[.,]\d{3})'
+                        matches = list(re.finditer(timecode_pattern, content))
+                        
+                        if not matches:
+                            continue
+                        
+                        formatted_blocks = []
+                        if not is_srt:
+                            formatted_blocks.append("WEBVTT")
+                        
+                        seq_num = 1
+                        
+                        for i, match in enumerate(matches):
+                            # Chuẩn hóa lại mũi tên thời gian cho đúng định dạng
+                            timecode = match.group(1).replace("->", "-->").replace("--->", "-->")
+                            
+                            # Cắt lấy đoạn text nằm giữa mốc thời gian này và mốc thời gian tiếp theo
+                            start_idx = match.end()
+                            end_idx = matches[i+1].start() if i + 1 < len(matches) else len(content)
+                            
+                            raw_text = content[start_idx:end_idx]
+                            
+                            text_lines = []
+                            for line in raw_text.split('\n'):
+                                line = line.strip()
+                                
+                                # 1. Bỏ qua dòng trống
+                                if not line:
+                                    continue
+                                    
+                                # 2. Tiêu diệt các số thứ tự dư thừa (kể cả số bị bôi đậm như **49**)
+                                if re.match(r'^\**\d+\**$', line):
+                                    continue
+                                    
+                                # 3. Cắt đuôi rác AI chat (Nếu gặp AI lảm nhảm -> Ngừng lấy text của block này)
+                                lower_line = line.lower()
+                                if any(junk in lower_line for junk in ["tuyệt vời", "dưới đây là", "hy vọng", "ngữ cảnh:", "thuật ngữ:"]) or line.startswith("---"):
+                                    break 
+                                    
+                                # 4. Bỏ qua chữ WEBVTT lọt thỏm vào giữa file
+                                if "WEBVTT" in line:
+                                    continue
+                                    
+                                text_lines.append(line)
+                            
+                            # Nếu lấy được text hợp lệ thì mới ráp thành block hoàn chỉnh
+                            if text_lines:
+                                text_content = "\n".join(text_lines)
+                                if is_srt:
+                                    formatted_blocks.append(f"{seq_num}\n{timecode}\n{text_content}")
+                                else:
+                                    formatted_blocks.append(f"{timecode}\n{text_content}")
+                                seq_num += 1
+                        
+                        # Nối tất cả các block lại, cách nhau đúng 2 dòng trống
+                        formatted_content = "\n\n".join(formatted_blocks) + "\n"
+                        
+                        with open(file_path, 'w', encoding='utf-8-sig') as file:
+                            file.write(formatted_content)
+                            
+                        count += 1
+                    except Exception as e:
+                        self.call_from_thread(sys_log.write_line, f"❌ Lỗi format file {f}: {e}")
+                        
+        self.call_from_thread(sys_log.write_line, f"✅ Đã dọn rác và format lại cấu trúc chuẩn {count} file!")
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--dir", required=True)
